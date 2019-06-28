@@ -82,7 +82,7 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:   "schema",
-			Value:  "import",
+			Value:  "public",
 			Usage:  "database schema",
 			EnvVar: "DB_SCHEMA",
 		},
@@ -173,5 +173,9 @@ func main() {
 		},
 	}
 
-	app.Run(os.Args)
+	err := app.Run(os.Args)
+	if err != nil {
+		log.Fatal(err)
+		os.Exit(1)
+	}
 }
