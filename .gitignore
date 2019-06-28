@@ -23,6 +23,8 @@ _testmain.go
 
 *.exe
 *.test
+*_amd64
 *.prof
 launch.json
 1.json
+pgfutter_darwin_amd64
