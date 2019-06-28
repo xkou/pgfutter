@@ -123,13 +123,13 @@ Import the JSON file.
 pgfutter json friends.json
 ```
 
-Your JSON objects will be stored in a single [JSON](http://www.postgresql.org/docs/9.4/static/datatype-json.html) column called `data`.
+Your JSON objects will be stored in multi columns
 
-data                                                          |
---------------------------------------------------------------|
-`{"name": "Jacob", "age": 26, "friends": ["Anthony"]}`        |
-`{"name": "Anthony", "age": 25, "friends": []}`               |
-`{"name": "Emma", "age": 28, "friends": ["Jacob", "Anthony"]}`|
+name    | age| friends         |
+--------|----|-----------------|
+Jacob   | 26 | Anthony         |
+Anthony | 25 |                 |
+Emma    | 28 | Jacob,Anthony   |
 
 [PostgreSQL has excellent JSON support](http://www.postgresql.org/docs/9.3/static/functions-json.html) which means you can then start
 normalizing your data.
