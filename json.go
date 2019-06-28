@@ -11,6 +11,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/cheggaaa/pb"
 )
 
 // Try to JSON decode the bytes
@@ -179,9 +181,10 @@ func importJSON(filename string, connStr string, schema string, tableName string
 	defer db.Close()
 
 	lineNumber := 0
+	var reader *bufio.Reader
+	var bar *pb.ProgressBar
 	if filename == "" {
-		//	reader := bufio.NewReader(os.Stdin)
-		//	err, success, failed = copyJSONRows(i, reader, ignoreErrors)
+		reader = bufio.NewReader(os.Stdin)
 	} else {
 		file, err := os.Open(filename)
 		if err != nil {
@@ -189,32 +192,33 @@ func importJSON(filename string, connStr string, schema string, tableName string
 		}
 		defer file.Close()
 
-		bar := NewProgressBar(file)
-		reader := bufio.NewReader(io.TeeReader(file, bar))
+		bar = NewProgressBar(file)
+		reader = bufio.NewReader(io.TeeReader(file, bar))
 		bar.Start()
-
-		for {
-			line, _, err := reader.ReadLine()
-			lineNumber += 1
-			if io.EOF == err {
-				break
-			}
-			if err != nil {
-				return err
-			}
-			err = handle_line(line, db, tableName)
-			if err != nil {
-				stmt = nil
-				err = handle_line(line, db, tableName)
-				if err != nil {
-					log.Println("err lineno:", lineNumber)
-					return err
-				}
-			}
-		}
-		bar.Finish()
 	}
 
+	for {
+		line, _, err := reader.ReadLine()
+		lineNumber += 1
+		if io.EOF == err {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		err = handle_line(line, db, tableName)
+		if err != nil {
+			stmt = nil
+			err = handle_line(line, db, tableName)
+			if err != nil {
+				log.Println("err lineno:", lineNumber)
+				return err
+			}
+		}
+	}
+	if bar != nil {
+		bar.Finish()
+	}
 	fmt.Println(fmt.Sprintf("%d rows imported into %s.%s", lineNumber, schema, tableName))
 
 	return nil

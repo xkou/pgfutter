@@ -131,28 +131,7 @@ Jacob   | 26 | Anthony         |
 Anthony | 25 |                 |
 Emma    | 28 | Jacob,Anthony   |
 
-[PostgreSQL has excellent JSON support](http://www.postgresql.org/docs/9.3/static/functions-json.html) which means you can then start
-normalizing your data.
 
-```sql
-CREATE TABLE public.person (
-    name VARCHAR(200) PRIMARY KEY,
-    age INTEGER
-)
-
-CREATE TABLE public.friendship (
-    person VARCHAR(200) REFERENCES public.person(name),
-    friend VARCHAR(200) REFERENCES public.person(name)
-)
-
-INSERT INTO public.person
-SELECT data->>'name' as name, (data->>'age')::int as age
-FROM import.friends
-
-INSERT INTO public.friendship
-SELECT data->>'name' as person, json_array_elements_text(data->'friends')
-FROM import.friends
-```
 
 ## Database Connection
 
