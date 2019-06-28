@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cheggaaa/pb"
 )
@@ -98,11 +99,11 @@ func check_types(m *map[string]interface{}, dbtypes *map[string]string, db *sql.
 			if v2 != dt {
 				if dt == "double precision" ||
 					dt == "bigint" {
-					db.Query(fmt.Sprintf("alter table %s alter column %s type %s", tb, k, dt))
+					db.Query(fmt.Sprintf("alter table %s alter column \"%s\" type %s", tb, k, dt))
 				}
 			}
 		} else {
-			_, err := db.Query(fmt.Sprintf("alter table %s add column %s %s", tb, k, dt))
+			_, err := db.Query(fmt.Sprintf("alter table %s add column \"%s\" %s", tb, k, dt))
 			if err != nil {
 				return err
 			}
@@ -196,10 +197,14 @@ func importJSON(filename string, connStr string, schema string, tableName string
 		reader = bufio.NewReader(io.TeeReader(file, bar))
 		bar.Start()
 	}
-
+	last_time := time.Now().UnixNano()/1000000
 	for {
 		line, _, err := reader.ReadLine()
 		lineNumber += 1
+		if lineNumber%1000==0{
+			fmt.Println(lineNumber, time.Now().UnixNano()/1000000-last_time, "ms")
+			last_time =  time.Now().UnixNano()/1000000
+		}
 		if io.EOF == err {
 			break
 		}
