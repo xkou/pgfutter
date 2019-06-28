@@ -2,6 +2,8 @@
 
 <img align="right" alt="elephant" src="elephant.jpg" />
 
+Real json support.
+
 Import CSV and line delimited JSON into PostgreSQL the easy way.
 This small tool abstract all the hassles and swearing you normally
 have to deal with when you just want to dump some data into the database.
