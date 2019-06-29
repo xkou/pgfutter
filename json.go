@@ -11,9 +11,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
-
-	"github.com/cheggaaa/pb"
 )
 
 // Try to JSON decode the bytes
@@ -113,67 +112,9 @@ func check_types(m *map[string]interface{}, dbtypes *map[string]string, db *sql.
 	return nil
 }
 
-var stmt *sql.Stmt
-var b_create_table bool = false
-var keys []string
-var params []interface{}
-var dbtypes map[string]string = make(map[string]string)
-
-func handle_line(line []byte, db *sql.DB, tableName string) error {
-	if b_create_table == false {
-		_, err := db.Query(fmt.Sprintf("drop table if exists %s; create table %s ()", tableName, tableName))
-		if err != nil {
-			return err
-		}
-		b_create_table = true
-	}
-	var o interface{}
-	err := json.Unmarshal(line, &o)
-	if err != nil {
-		return err
-	}
-
-	m := o.(map[string]interface{})
-
-	if stmt == nil {
-		check_types(&m, &dbtypes, db, tableName)
-		keys = make([]string, 0, len(m))
-		for k := range m {
-			keys = append(keys, k)
-		}
-		params = make([]interface{}, len(keys))
-		key := strings.Join(keys, "\",\"")
-		phs := make([]string, len(keys))
-		for i := range keys {
-			phs[i] = fmt.Sprintf("$%d", i+1)
-		}
-		sql := fmt.Sprintf("insert into %s(\"%s\")values(%s)",
-			tableName, key, strings.Join(phs, ","))
-		stmt, err = db.Prepare(sql)
-		if err != nil {
-			return err
-		}
-	}
-
-	m2 := make(map[string]struct{}) // check added column
-	for k := range m {
-		m2[k] = struct{}{}
-	}
-	for i, v := range keys {
-		params[i] = m[v]
-		delete(m2, v)
-	}
-	if len(m2) > 0 {
-		return errors.New("new col")
-	}
-	_, err = stmt.Exec(params...)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func importJSON(filename string, connStr string, schema string, tableName string, ignoreErrors bool, dataType string) error {
+func chan_work(idx int, connStr string, schema string, tb string, q <-chan []byte,
+	wg *sync.WaitGroup, mx *sync.Mutex, ctb chan int) error {
+	defer wg.Done()
 
 	db, err := connect(connStr, schema)
 	if err != nil {
@@ -181,9 +122,94 @@ func importJSON(filename string, connStr string, schema string, tableName string
 	}
 	defer db.Close()
 
-	lineNumber := 0
+	var stmt *sql.Stmt
+	var b_create_table bool = false
+	var keys []string
+	var params []interface{}
+	var dbtypes map[string]string = make(map[string]string)
+
+	handle_line := func(line []byte, db *sql.DB, tableName string) error {
+		if b_create_table == false {
+			if idx == 0 {
+				defer close(ctb)
+				_, err := db.Query(fmt.Sprintf("drop table if exists %s; create table %s ()", tableName, tableName))
+				if err != nil {
+					return err
+				}
+			} else {
+				<-ctb
+			}
+			b_create_table = true
+		}
+		var o interface{}
+		err := json.Unmarshal(line, &o)
+		if err != nil {
+			return err
+		}
+
+		m := o.(map[string]interface{})
+
+		if stmt == nil {
+			mx.Lock()
+			defer mx.Unlock()
+			check_types(&m, &dbtypes, db, tableName)
+			keys = make([]string, 0, len(m))
+			for k := range m {
+				keys = append(keys, k)
+			}
+			params = make([]interface{}, len(keys))
+			key := strings.Join(keys, "\",\"")
+			phs := make([]string, len(keys))
+			for i := range keys {
+				phs[i] = fmt.Sprintf("$%d", i+1)
+			}
+			sql := fmt.Sprintf("insert into %s(\"%s\")values(%s)",
+				tableName, key, strings.Join(phs, ","))
+			stmt, err = db.Prepare(sql)
+			if err != nil {
+				return err
+			}
+		}
+
+		m2 := make(map[string]struct{}) // check added column
+		for k := range m {
+			m2[k] = struct{}{}
+		}
+		for i, v := range keys {
+			params[i] = m[v]
+			delete(m2, v)
+		}
+		if len(m2) > 0 {
+			return errors.New("new col")
+		}
+		_, err = stmt.Exec(params...)
+		if err != nil {
+			log.Println(err)
+			return err
+		}
+		return nil
+	}
+
+	for line := range q {
+		err = handle_line(line, db, tb)
+		if err != nil {
+			stmt = nil
+			err = handle_line(line, db, tb)
+			if err != nil {
+				log.Println(string(line))
+				log.Println(err)
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+func importJSON(filename string, connStr string, schema string, tableName string, ignoreErrors bool, dataType string, threadn int) error {
+
 	var reader *bufio.Reader
-	var bar *pb.ProgressBar
+	q := make(chan []byte, 100000)
+
 	if filename == "" {
 		reader = bufio.NewReader(os.Stdin)
 	} else {
@@ -192,39 +218,56 @@ func importJSON(filename string, connStr string, schema string, tableName string
 			return err
 		}
 		defer file.Close()
-
-		bar = NewProgressBar(file)
-		reader = bufio.NewReader(io.TeeReader(file, bar))
-		bar.Start()
+		reader = bufio.NewReader(file)
 	}
-	last_time := time.Now().UnixNano()/1000000
-	for {
-		line, _, err := reader.ReadLine()
-		lineNumber += 1
-		if lineNumber%1000==0{
-			fmt.Println(lineNumber, time.Now().UnixNano()/1000000-last_time, "ms")
-			last_time =  time.Now().UnixNano()/1000000
-		}
-		if io.EOF == err {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		err = handle_line(line, db, tableName)
-		if err != nil {
-			stmt = nil
-			err = handle_line(line, db, tableName)
+	start_time := time.Now().UnixNano() / 1000000
+
+	rown_ch := make(chan int, 10)
+
+	reads := func() error {
+		defer close(q)
+		linen := 0
+		for {
+			line, _, err := reader.ReadLine()
+			linen++
+			if io.EOF == err {
+				fmt.Println(fmt.Sprintf("read %d rows in %d ms", linen, time.Now().UnixNano()/1000000-start_time))
+				rown_ch <- linen
+				break
+			}
 			if err != nil {
-				log.Println("err lineno:", lineNumber)
 				return err
 			}
+			line2 := make([]byte, len(line))
+			copy(line2, line)
+			q <- line2
 		}
+
+		for {
+			l := len(q)
+			if l == 0 {
+				break
+			}
+			fmt.Println(l)
+			time.Sleep(time.Second)
+		}
+		return nil
 	}
-	if bar != nil {
-		bar.Finish()
+	var wg sync.WaitGroup
+	var mux sync.Mutex
+	go reads()
+	creat_tbc := make(chan int)
+	for i := 0; i < threadn; i++ {
+		wg.Add(1)
+		go chan_work(i, connStr, schema, tableName, q, &wg, &mux, creat_tbc)
 	}
-	fmt.Println(fmt.Sprintf("%d rows imported into %s.%s", lineNumber, schema, tableName))
+
+	wg.Wait()
+
+	rown := <-rown_ch
+	use_t := time.Now().UnixNano()/1000000 - start_time
+	fmt.Println(fmt.Sprintf("imported into %s.%s, %d row, use %d ms, %d/s", schema, tableName,
+		rown, use_t, rown*1000/int(use_t)))
 
 	return nil
 }

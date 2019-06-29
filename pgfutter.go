@@ -86,6 +86,11 @@ func main() {
 			Usage:  "database schema",
 			EnvVar: "DB_SCHEMA",
 		},
+		cli.IntFlag{
+			Name:  "thread, t",
+			Value: 1,
+			Usage: "thread num",
+		},
 		cli.StringFlag{
 			Name:   "table",
 			Usage:  "destination table",
@@ -114,9 +119,10 @@ func main() {
 				schema := c.GlobalString("schema")
 				tableName := parseTableName(c, filename)
 				dataType := getDataType(c)
+				threadn := c.GlobalInt("thread")
 
 				connStr := parseConnStr(c)
-				err := importJSON(filename, connStr, schema, tableName, ignoreErrors, dataType)
+				err := importJSON(filename, connStr, schema, tableName, ignoreErrors, dataType, threadn)
 				return err
 			},
 		},
